@@ -183,7 +183,7 @@ def create_multimodal_bnb_optimizer(args: 'TrainingArguments', model, dataset):
                 'lr': lr,
             })
     optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(args, model)
-    return bnb.optim.AdamW8bit(optimizer_grouped_parameters, **optimizer_kwargs, eps=1e-5), None
+    return bnb.optim.AdamW8bit(optimizer_grouped_parameters, **optimizer_kwargs), None
 
 
 # Add your own optimizers here, use --optimizer xxx to train
