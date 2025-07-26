@@ -10,6 +10,7 @@ from transformers import Trainer
 
 from swift.trainers.optimizers.galore import create_optimizer_and_scheduler
 from swift.utils import get_dist_setting
+import bitsandbytes as bnb
 
 if TYPE_CHECKING:
     from swift.trainers import TrainingArguments
@@ -156,6 +157,34 @@ def create_multimodal_optimizer(args: 'TrainingArguments', model, dataset):
     optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(args, model)
     return optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs), None
 
+def create_multimodal_bnb_optimizer(args: 'TrainingArguments', model, dataset):
+    """ViT/Aligner/LLM use different learning rates."""
+    from swift.llm import get_model_arch
+    decay_parameters = set(Trainer.get_decay_parameter_names(None, model))
+    model_arch = get_model_arch(model.model_meta.model_arch)
+    vit_parameters = get_param_startswith(model, model_arch.vision_tower, model_arch.aligner)
+    aligner_parameters = get_param_startswith(model, model_arch.aligner)
+    llm_parameters = get_param_startswith(model, model_arch.language_model)
+    optimizer_grouped_parameters = []
+    for lr, parameters in zip([args.vit_lr, args.aligner_lr, args.learning_rate],
+                              [vit_parameters, aligner_parameters, llm_parameters]):
+        if lr is None:
+            lr = args.learning_rate
+        for wd in [0., args.weight_decay]:
+            if wd == 0:
+                params = [p for n, p in parameters if n not in decay_parameters]
+            else:
+                params = [p for n, p in parameters if n in decay_parameters]
+            if not params:
+                continue
+            optimizer_grouped_parameters.append({
+                'params': params,
+                'weight_decay': args.weight_decay,
+                'lr': lr,
+            })
+    optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(args, model)
+    return bnb.optim.AdamW8bit(optimizer_grouped_parameters, **optimizer_kwargs, eps=1e-5), None
+
 
 # Add your own optimizers here, use --optimizer xxx to train
 optimizers_map = {
@@ -163,4 +192,5 @@ optimizers_map = {
     'lorap': create_lorap_optimizer,
     'muon': create_muon_optimizer,
     'multimodal': create_multimodal_optimizer,
+    "bnb_mm": create_multimodal_bnb_optimizer
 }
